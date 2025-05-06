@@ -35,41 +35,55 @@ def fetch_kijiji(query, max_items=5):
         })
     return results
 
-# — Facebook Marketplace via Apify actor —
+# … your imports and Kijiji code above …
+
+# — Facebook via Apify with error handling & logging —
 def fetch_facebook(query, max_items=5):
     actor_id = "apify/facebook-marketplace-scraper"
-    run_url = (
-        f"https://api.apify.com/v2/acts/{actor_id}/runs?token={APIFY_TOKEN}"
+    token    = os.getenv("APIFY_TOKEN")
+    run_url  = (
+        f"https://api.apify.com/v2/acts/{actor_id}/runs"
+        f"?token={token}"
     )
-    payload = {"searchString": query, "maxItems": max_items}
-    r = requests.post(run_url, json=payload)
-    r.raise_for_status()
-    dataset_id = r.json().get("defaultDatasetId")
-    if not dataset_id:
+
+    # Log for debugging (will appear in Streamlit logs)
+    st.write("APIFY_TOKEN:", token)
+    st.write("Facebook run URL:", run_url)
+
+    try:
+        r = requests.post(run_url, json={"searchString": query, "maxItems": max_items})
+        r.raise_for_status()
+        dataset_id = r.json().get("defaultDatasetId")
+        if not dataset_id:
+            st.warning("No dataset returned from Apify run.")
+            return []
+        ds_url = (
+            f"https://api.apify.com/v2/datasets/{dataset_id}/items"
+            f"?token={token}&format=json&clean=1"
+        )
+        items = requests.get(ds_url).json()
+        return [
+            {
+                "title":  it.get("title"),
+                "price":  it.get("price"),
+                "link":   it.get("url"),
+                "image":  it.get("images", [None])[0],
+                "source": "Facebook"
+            }
+            for it in items
+        ]
+    except Exception as e:
+        st.error(f"⚠️ Facebook fetch failed: {e}")
         return []
-    ds_url = (
-        f"https://api.apify.com/v2/datasets/{dataset_id}/items"
-        f"?token={APIFY_TOKEN}&format=json&clean=1"
-    )
-    listings = requests.get(ds_url).json()
-    results = []
-    for it in listings:
-        results.append({
-            "title":  it.get("title"),
-            "price":  it.get("price"),
-            "link":   it.get("url"),
-            "image":  it.get("images", [None])[0],
-            "source": "Facebook"
-        })
-    return results
+
 
 # — Main UI —
 query = st.text_input("Search live classifieds (e.g. 'road bike under $500')")
 if query:
     st.markdown(f"**Searching for:** {query}")
     kijiji = fetch_kijiji(query)
-    fb     = fetch_facebook(query)
-    all_items = kijiji + fb
+    facebook_results = fetch_facebook(query)
+all_results      = kijiji_results + facebook_results
 
     if not all_items:
         st.error("No results found. Try a different search.")
